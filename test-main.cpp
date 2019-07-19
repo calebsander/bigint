@@ -8,6 +8,10 @@ std::string builtinToString(const BigInt::sword_t n) {
 	return stream.str();
 }
 
+int8_t signum(const BigInt::sword_t n) {
+	return (n > 0) - (n < 0);
+}
+
 TEST_CASE("toString") {
 	// Test small values
 	for (BigInt::sword_t i = -100000; i < 100000; i++) {
@@ -22,6 +26,195 @@ TEST_CASE("toString") {
 	CHECK(bigPrime.toString(36) == "1MVK6EPI7TT884KCU5JU26LWKIOF1TM5SAEM30M4VKWZ0C3VC5D0YP8A1RSS7LG4I3ZUMR0H2T3UU5P1FDP4HZH2S28BK37P1C76N6I6W8263PNG99KC0Z3CMIETAC6WNXKQ8M4GJBXWHULM9381DF7SUBBPP27R0ABILRKX07B5WIGBHM7CNBY0K934HT4LM2XTJOOBDQ0LTFLC8W3CFE68T5SPRDAUSGMPPRAZNT14CIRIIWZKYZU5TU6EEQR36DSLAMPPDMPEWJN8E8SLFZVKTL1VCM6FUG7DI30XWXG0K3R37S7QF58DQSBN94QKK6CKZ0T1U2UHYES4QERDLSI2JB6LLECESZ9AQ3TV1IKF6EPE1DZQ1KWC0B42BGG2X45RWRK2LVMDB");
 	CHECK_THROWS_WITH(bigPrime.toString(1), "Invalid radix");
 	CHECK_THROWS_WITH(bigPrime.toString(37), "Invalid radix");
+}
+
+TEST_CASE("bitwise negate") {
+	// Test 0-word numbers
+	BigInt value = ~BigInt();
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "-1");
+	value = ~BigInt((BigInt::sword_t) -1);
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+
+	// Test 1-word number
+	value = BigInt("fedcba9876543210", 16);
+	value.invert();
+	CHECK(value.isTrimmed());
+	CHECK(value.toString(16) == "-FEDCBA9876543211");
+	value.invert();
+	CHECK(value.isTrimmed());
+	CHECK(value.toString(16) == "FEDCBA9876543210");
+
+	// Test multi-word number
+	value = BigInt("12345678901234567890123456789012345678901234567890");
+	CHECK(value.isTrimmed());
+	CHECK((~value).toString() == "-12345678901234567890123456789012345678901234567891");
+}
+
+TEST_CASE("bitwise and") {
+	// Test trivial ands
+	BigInt value("12345678901234567890123456789012345678901234567890");
+	BigInt result = value & BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "0");
+	result = value & ~BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == value.toString());
+
+	// Test ands with the same number of words
+	result = value & value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == value.toString());
+	result = value & ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "0");
+	result = ~value & value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "0");
+	result = ~value & ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == (~value).toString());
+
+	// Test ands with fewer words
+	BigInt shorter("123456789012345678901234567890");
+	result = value & shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "79266869146740925354769058514");
+	result = value & ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "12345678901234567890044189919865604753546465509376");
+	result = ~value & shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "44189919865604753546465509376");
+	result = ~value & ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-12345678901234567890167646708877950432447700077267");
+
+	// Test ands with more words
+	BigInt longer("123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
+	result = value & longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "12059328684042537090238959080876447469613543787218");
+	result = value & ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "286350217192030799884497708135898209287690780672");
+	result = ~value & longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "123456789012345678901234567890123456789000286350217192030799884497708135898209287690780672");
+	result = ~value & ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-123456789012345678901234567890123456789012632029118426598690007954497148243888188925348563");
+}
+
+TEST_CASE("bitwise or") {
+	// Test trivial ors
+	BigInt value("12345678901234567890123456789012345678901234567890");
+	BigInt result = value | BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == value.toString());
+	result = value | ~BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-1");
+
+	// Test ors with the same number of words
+	result = value | value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == value.toString());
+	result = value | ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-1");
+	result = ~value | value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-1");
+	result = ~value | ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == (~value).toString());
+
+	// Test ors with fewer words
+	BigInt shorter("123456789012345678901234567890");
+	result = value | shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "12345678901234567890167646708877950432447700077266");
+	result = value | ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-44189919865604753546465509377");
+	result = ~value | shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-12345678901234567890044189919865604753546465509377");
+	result = ~value | ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-79266869146740925354769058515");
+
+	// Test ors with more words
+	BigInt longer("123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
+	result = value | longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "123456789012345678901234567890123456789012632029118426598690007954497148243888188925348562");
+	result = value | ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-123456789012345678901234567890123456789000286350217192030799884497708135898209287690780673");
+	result = ~value | longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-286350217192030799884497708135898209287690780673");
+	result = ~value | ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-12059328684042537090238959080876447469613543787219");
+}
+
+TEST_CASE("bitwise xor") {
+	// Test trivial xors
+	BigInt value("12345678901234567890123456789012345678901234567890");
+	BigInt result = value ^ BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == value.toString());
+	result = value ^ ~BigInt();
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == (~value).toString());
+
+	// Test xors with the same number of words
+	result = value ^ value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "0");
+	result = value ^ ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-1");
+	result = ~value ^ value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-1");
+	result = ~value ^ ~value;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "0");
+
+	// Test xors with fewer words
+	BigInt shorter("123456789012345678901234567890");
+	result = value ^ shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "12345678901234567890088379839731209507092931018752");
+	result = value ^ ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-12345678901234567890088379839731209507092931018753");
+	result = ~value ^ shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-12345678901234567890088379839731209507092931018753");
+	result = ~value ^ ~shorter;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "12345678901234567890088379839731209507092931018752");
+
+	// Test xors with more words
+	BigInt longer("123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
+	result = value ^ longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "123456789012345678901234567890123456789000572700434384061599768995416271796418575381561344");
+	result = value ^ ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-123456789012345678901234567890123456789000572700434384061599768995416271796418575381561345");
+	result = ~value ^ longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "-123456789012345678901234567890123456789000572700434384061599768995416271796418575381561345");
+	result = ~value ^ ~longer;
+	CHECK(result.isTrimmed());
+	CHECK(result.toString() == "123456789012345678901234567890123456789000572700434384061599768995416271796418575381561344");
 }
 
 TEST_CASE("addition") {
@@ -67,4 +260,66 @@ TEST_CASE("addition") {
 	value += BigInt("9876543210987654321098765432109876543210");
 	CHECK(value.isTrimmed());
 	CHECK(value.toString() == "9876543210987654321098765432109876543209");
+}
+
+TEST_CASE("comparison") {
+	// Test small values
+	for (BigInt::sword_t i = -1000; i < 1000; i++) {
+		BigInt bigI(i);
+		for (BigInt::sword_t j = -100; j < 100; j++) {
+			CHECK(bigI.cmp(BigInt(j)) == signum(i - j));
+		}
+	}
+
+	// Test comparison operators
+	CHECK(!(BigInt("1") == BigInt("0")));
+	CHECK(BigInt("1") == BigInt("1"));
+	CHECK(!(BigInt("1") == BigInt("2")));
+
+	CHECK(BigInt("1") != BigInt("0"));
+	CHECK(!(BigInt("1") != BigInt("1")));
+	CHECK(BigInt("1") != BigInt("2"));
+
+	CHECK(!(BigInt("1") < BigInt("0")));
+	CHECK(!(BigInt("1") < BigInt("1")));
+	CHECK(BigInt("1") < BigInt("2"));
+
+	CHECK(!(BigInt("1") <= BigInt("0")));
+	CHECK(BigInt("1") <= BigInt("1"));
+	CHECK(BigInt("1") <= BigInt("2"));
+
+	CHECK(BigInt("1") > BigInt("0"));
+	CHECK(!(BigInt("1") > BigInt("1")));
+	CHECK(!(BigInt("1") > BigInt("2")));
+
+	CHECK(BigInt("1") >= BigInt("0"));
+	CHECK(BigInt("1") >= BigInt("1"));
+	CHECK(!(BigInt("1") >= BigInt("2")));
+
+	// Test multi-word numbers
+	CHECK(
+		BigInt("100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("99999999999999999999999999999999999999999999999999")) == +1
+	);
+	CHECK(
+		BigInt("100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("100000000000000000000000000000000000000000000000000")) == 0
+	);
+	CHECK(
+		BigInt("100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("100000000000000000000000000000000000000000000000001")) == -1
+	);
+
+	CHECK(
+		BigInt("-100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("-99999999999999999999999999999999999999999999999999")) == -1
+	);
+	CHECK(
+		BigInt("-100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("-100000000000000000000000000000000000000000000000000")) == 0
+	);
+	CHECK(
+		BigInt("-100000000000000000000000000000000000000000000000000")
+		.cmp(BigInt("-100000000000000000000000000000000000000000000000001")) == +1
+	);
 }

@@ -25,6 +25,7 @@ class BigInt {
 		BigInt &negate();
 		BigInt &operator&=(const BigInt &);
 		BigInt &operator|=(const BigInt &);
+		BigInt &operator^=(const BigInt &);
 		BigInt &operator<<=(size_t);
 		BigInt &operator>>=(size_t);
 		BigInt &operator+=(const BigInt &);
@@ -34,6 +35,7 @@ class BigInt {
 		BigInt operator-() const;
 		BigInt operator&(const BigInt &) const;
 		BigInt operator|(const BigInt &) const;
+		BigInt operator^(const BigInt &) const;
 		BigInt operator<<(size_t) const;
 		BigInt operator>>(size_t) const;
 		BigInt operator+(const BigInt &) const;

@@ -24,7 +24,7 @@ class DigitLookup {
 		inline char getDigit(const size_t value) const {
 			return valueDigits[value];
 		}
-		uint8_t getValue(const char digit) const {
+		inline uint8_t getValue(const char digit) const {
 			return digitValues[static_cast<uint8_t>(digit)];
 		}
 
@@ -72,6 +72,11 @@ inline BigInt::uword_t ceilDiv(BigInt::uword_t x, const BigInt::uword_t y) {
 	return x + !!remainder;
 }
 
+inline void invertWord(BigInt::uword_t &word) {
+	// clang and gcc are smart enough to emit a notq instead of an xorq
+	word ^= static_cast<BigInt::uword_t>(-1);
+}
+
 inline int8_t makeSign(const bool positive) {
 	return positive - !positive;
 }
@@ -86,7 +91,8 @@ BigInt::BigInt(const uword_t value) : sign(false) {
 	if (value) words.push_back(value);
 }
 BigInt::BigInt(const sword_t value) : sign(value < 0) {
-	if (value != getSignWord()) words.push_back(static_cast<uword_t>(value));
+	const uword_t word = static_cast<uword_t>(value);
+	if (word != getSignWord()) words.push_back(word);
 }
 BigInt::BigInt(const std::string &digits, const uword_t radix) : sign(false) {
 	checkRadix(radix);
@@ -130,9 +136,7 @@ BigInt &BigInt::operator=(BigInt other) {
 BigInt &BigInt::invert() {
 	uword_t * const data = words.data();
 	const size_t wordCount = words.size();
-	for (size_t index = 0; index < wordCount; index++) {
-		data[index] ^= (uword_t) -1;
-	}
+	for (size_t index = 0; index < wordCount; index++) invertWord(data[index]);
 	sign = !sign;
 	return *this;
 }
@@ -157,18 +161,7 @@ BigInt &BigInt::negate() {
 	);
 	if (wordCount) {
 		words.pop_back();
-		if (--wordCount) {
-			asm(
-				"1:"
-				"add %2, %0\n"
-				"notq (%0)\n"
-				"dec %1\n"
-				"ja 1b\n"
-				:
-				: "r"(word), "r"(wordCount), "i"(sizeof(*word))
-				: "cc"
-			);
-		}
+		while (--wordCount) invertWord(*++word);
 	}
 	return *this;
 }
@@ -221,6 +214,42 @@ BigInt &BigInt::operator|=(const BigInt &other) {
 		index++;
 	}
 	sign |= other.sign;
+	trim();
+	return *this;
+}
+BigInt &BigInt::operator^=(const BigInt &other) {
+	const size_t wordCount = words.size(), otherWordCount = other.words.size();
+	size_t xorWordCount;
+	if (wordCount < otherWordCount) {
+		xorWordCount = wordCount;
+		words.resize(otherWordCount); // TODO: can this initialization be avoided?
+	}
+	else xorWordCount = otherWordCount;
+	uword_t * const data = words.data();
+	const uword_t * const otherData = other.words.data();
+	size_t index;
+	for (index = 0; index < xorWordCount; index++) {
+		data[index] ^= otherData[index];
+	}
+	if (index < otherWordCount) {
+		if (sign) {
+			do {
+				data[index] = ~otherData[index];
+			} while (++index < otherWordCount);
+		}
+		else {
+			do {
+				data[index] = otherData[index];
+			} while (++index < otherWordCount);
+		}
+	}
+	else if (other.sign) {
+		while (index < wordCount) {
+			invertWord(data[index]);
+			index++;
+		}
+	}
+	sign ^= other.sign;
 	trim();
 	return *this;
 }
@@ -332,6 +361,10 @@ BigInt BigInt::operator|(const BigInt &other) const {
 	// TODO: optimize to avoid traversing words twice
 	return BigInt(*this) |= other;
 }
+BigInt BigInt::operator^(const BigInt &other) const {
+	// TODO: optimize to avoid traversing words twice
+	return BigInt(*this) ^= other;
+}
 BigInt BigInt::operator<<(const size_t bits) const {
 	// TODO: optimize to avoid traversing words twice
 	return BigInt(*this) <<= bits;
@@ -354,35 +387,38 @@ int8_t BigInt::cmp(const BigInt &other) const {
 	if (signDiff) return signDiff;
 
 	size_t wordCount = words.size();
-	const ptrdiff_t wordCountCmp = wordCount - other.words.size();
-	if (wordCountCmp) return makeSign((wordCountCmp < 0) ^ sign);
+	const size_t otherWordCount = other.words.size();
+	if (wordCount > otherWordCount) return makeSign(!sign);
+	if (wordCount < otherWordCount) return makeSign(sign);
 
+	const uword_t * const data = words.data();
+	const uword_t * const otherData = other.words.data();
 	while (wordCount) {
 		--wordCount;
-		const size_t word = words[wordCount], otherWord = other.words[wordCount];
+		const uword_t word = data[wordCount], otherWord = otherData[wordCount];
 		if (word > otherWord) return +1;
 		if (word < otherWord) return -1;
 	}
 
 	return 0;
 }
-inline bool BigInt::operator<(const BigInt &other) const {
+bool BigInt::operator<(const BigInt &other) const {
 	return cmp(other) < 0;
 }
-inline bool BigInt::operator<=(const BigInt &other) const {
-	return cmp(other) <= 0;
+bool BigInt::operator<=(const BigInt &other) const {
+	return !(*this > other);
 }
-inline bool BigInt::operator==(const BigInt &other) const {
+bool BigInt::operator==(const BigInt &other) const {
 	return !cmp(other);
 }
-inline bool BigInt::operator!=(const BigInt &other) const {
-	return !!cmp(other);
+bool BigInt::operator!=(const BigInt &other) const {
+	return !(*this == other);
 }
-inline bool BigInt::operator>(const BigInt &other) const {
+bool BigInt::operator>(const BigInt &other) const {
 	return cmp(other) > 0;
 }
-inline bool BigInt::operator>=(const BigInt &other) const {
-	return cmp(other) >= 0;
+bool BigInt::operator>=(const BigInt &other) const {
+	return !(*this < other);
 }
 
 std::string BigInt::toString(const uword_t radix) const {
@@ -421,12 +457,12 @@ std::string BigInt::toString(const uword_t radix) const {
 	return result;
 }
 
-inline BigInt::operator bool() const {
+BigInt::operator bool() const {
 	return sign || words.size();
 }
 
 bool BigInt::isTrimmed() const {
-	return !(words.size() && words.back() == getSignWord());
+	return words.empty() || words.back() != getSignWord();
 }
 
 inline BigInt::uword_t BigInt::getSignWord() const {
