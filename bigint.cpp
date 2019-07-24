@@ -141,9 +141,13 @@ BigInt &BigInt::invert() {
 	return *this;
 }
 BigInt &BigInt::negate() {
-	if (!*this) return *this;
+	// If negative, may become one word longer
+	if (sign) words.push_back(getSignWord());
+	else {
+		// If zero, value is unchanged
+		if (words.empty()) return *this;
+	}
 
-	words.push_back(getSignWord());
 	sign = !sign;
 	size_t wordCount = words.size();
 	uword_t *word = words.data();
@@ -160,8 +164,18 @@ BigInt &BigInt::negate() {
 		: "cc"
 	);
 	if (wordCount) {
-		words.pop_back();
-		while (--wordCount) invertWord(*++word);
+		if (!sign) { // not all words were negated, so added word is unneeded
+			words.pop_back();
+			wordCount--;
+		}
+		while (wordCount) {
+			invertWord(*++word);
+			wordCount--;
+		}
+	}
+	else {
+		// If positive, may become one word shorter
+		if (sign && *word == static_cast<uword_t>(-1)) words.pop_back();
 	}
 	return *this;
 }
@@ -344,6 +358,9 @@ BigInt &BigInt::operator-=(const BigInt &other) {
 	// TODO: optimize to avoid traversing words twice
 	return *this += -other;
 }
+BigInt &BigInt::operator*=(const BigInt &other) {
+	return *this = *this * other;
+}
 
 BigInt BigInt::operator~() const {
 	// TODO: optimize to avoid traversing words twice
@@ -380,6 +397,55 @@ BigInt BigInt::operator+(const BigInt &other) const {
 BigInt BigInt::operator-(const BigInt &other) const {
 	// TODO: optimize to avoid traversing words three times
 	return BigInt(*this) -= other;
+}
+BigInt BigInt::operator*(const BigInt &other) const {
+	const BigInt &positiveThis = sign ? -*this : *this;
+	const BigInt &positiveOther = other.sign ? -other : other;
+	const size_t wordCount = positiveThis.words.size();
+	size_t otherWordCount = positiveOther.words.size();
+	BigInt result, wordProduct;
+	{
+		const size_t resultWordCount = wordCount + otherWordCount;
+		result.words.reserve(resultWordCount);
+		wordProduct.words.reserve(resultWordCount);
+	}
+	wordProduct.words.resize(wordCount); // TODO: skip this initialization
+	const uword_t * const thisWords = positiveThis.words.data();
+	const uword_t *otherWord = positiveOther.words.data();
+	uword_t *productWordStart = wordProduct.words.data();
+	for (; otherWordCount; otherWordCount--, otherWord++) {
+		uword_t carry = 0;
+		for (size_t thisIndex = 0; thisIndex < wordCount; thisIndex++) {
+			asm(
+				"mulq %3\n"
+				"add %4, %0\n"
+				"adc $0, %1\n"
+				: "=a"(productWordStart[thisIndex]), "=&d"(carry)
+				: "a"(thisWords[thisIndex]), "g"(*otherWord), "g"(carry)
+				: "cc"
+			);
+		}
+		wordProduct.words.push_back(carry);
+		// TODO: can the addition be performed while multiplying to avoid traversing words twice?
+		result += wordProduct;
+		*(productWordStart++) = 0;
+	}
+	result.trim();
+	if (sign ^ other.sign) result.negate();
+	return result;
+}
+BigInt BigInt::pow(size_t power) const {
+	BigInt result(static_cast<uword_t>(1));
+	if (power) {
+		BigInt multiplier(*this);
+		for (;;) {
+			if (power & 1) result *= multiplier;
+			if (!(power >>= 1)) break;
+
+			multiplier *= multiplier;
+		}
+	}
+	return result;
 }
 
 int8_t BigInt::cmp(const BigInt &other) const {

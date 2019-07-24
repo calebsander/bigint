@@ -262,6 +262,102 @@ TEST_CASE("addition") {
 	CHECK(value.toString() == "9876543210987654321098765432109876543209");
 }
 
+TEST_CASE("multiplication") {
+	BigInt zero;
+	BigInt oneWord((BigInt::uword_t) -1);
+	BigInt twoWords = oneWord << 64 | oneWord;
+	BigInt value = zero * zero;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+	value = zero * oneWord;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+	value = zero * twoWords;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+	value = oneWord * zero;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+	value = twoWords * zero;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "0");
+
+	// Test one-word values without carries
+	value = BigInt("100") * BigInt("1000");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "100000");
+	value = BigInt("1000") * BigInt("100");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "100000");
+
+	// Test carries
+	value = oneWord * oneWord;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "340282366920938463426481119284349108225");
+	value = oneWord * twoWords;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "6277101735386680763495507056286727952620534092958556749825");
+	value = twoWords * oneWord;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "6277101735386680763495507056286727952620534092958556749825");
+	value = twoWords * twoWords;
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "115792089237316195423570985008687907852589419931798687112530834793049593217025");
+
+	// Test large random values
+	value =
+		BigInt("5b60628f044215620838e243cb52bd4cbd3a73c0ba652a71f9007050090e2035a48bc5cb47c60b1ec450cc7837113de6abff176fa2ddb0bb1513f243c4774a7f2d82c615241b46bdccc522b67c1b6b223244f1e6ec5794678b3804e411b4251ede157aaf", 16) *
+		BigInt("64e8ab0c4624185f2dd71d255e493e913a6d7ecfc0f99f64efde869c05c2e43f2f2dbf86f6c0674fdc19c54a59ab369cd44b0f67fd45aa202ce8b00581ecdf8241947d9b99248350977196756064f1100abcaa956bf6d15e7f0ac9d62122040c0ed53735", 16);
+	CHECK(value.isTrimmed());
+	CHECK(value.toString(16) == "2404B2E6F2A90FFDFD14884FACD67B5B28A6F3CFF5CFAA965BBA67BDBA4A6EFA07B4DF3E47448DCC6DF5FD7FAAD6BE34E386825BA7FB3686F9ADD93B1D7127C8AA9588F3D54D39BACBB0DAF7315DDF60BC8D05E39D7D87162C4840DAF52C49EFAAF0C014D0D9F59619DD173930B5E4DA9598BD69D26896738F344AF0931BEB1301F2593E9234332B82055FFCF745B1F220172657A673156594DF33483E6DDA47270AF4EF10C680F09E6C65DCC93BD4AA580C14FFEB3677177561C009133F09CF8A43C1E33D68FF3B");
+
+	// Test multiplication with negative numbers
+	for (BigInt::sword_t i = -1000; i < 1000; i++) {
+		BigInt bigI(i);
+		for (BigInt::sword_t j = -100; j < 100; j++) {
+			BigInt product = bigI * BigInt(j);
+			CHECK(product.isTrimmed());
+			CHECK(product.toString() == builtinToString(i * j));
+		}
+	}
+}
+
+TEST_CASE("exponentiation") {
+	// Test that raising to the power 0 gives 1
+	// and raising to the power 1 gives the original number
+	for (BigInt::sword_t i = -1000; i < 1000; i++) {
+		BigInt bigI(i);
+		BigInt power = bigI.pow(0);
+		CHECK(power.isTrimmed());
+		CHECK(power.toString() == "1");
+		power = bigI.pow(1);
+		CHECK(power.isTrimmed());
+		CHECK(power.toString() == bigI.toString());
+	}
+
+	// Test powers of 2
+	for (uint8_t i = 0; i < (sizeof(BigInt::uword_t) << 3) - 1; i++) {
+		BigInt power = BigInt((BigInt::uword_t) 2).pow(i);
+		CHECK(power.isTrimmed());
+		CHECK(power.toString() == builtinToString((BigInt::uword_t) 1 << i));
+	}
+
+	// Test negative numbers
+	BigInt::sword_t result = 1;
+	for (uint8_t i = 0; i <= 10; i++) {
+		BigInt power = BigInt((BigInt::sword_t) -3).pow(i);
+		CHECK(power.isTrimmed());
+		CHECK(power.toString() == builtinToString(result));
+		result *= -3;
+	}
+
+	// Test large values
+	BigInt large("8FE10177DF321B682B8F2E0DFE5A24833B1801CF6F4735CC611D9710DB712835ACAD5A3F155D915AB8F264678F276F28473430DD752B9EB4BA3FD919A1B48FB3645443185C78EBD916B40511B49E854C86910A7F45FD497B6B8CAD54352230A9B2574C24", 16);
+	large = large.pow(5);
+	CHECK(large.isTrimmed());
+	CHECK(large.toString(16) == "E5B12ED73B341C7A255FED41C3CBB8A6AF81449F10D785BE83D5605B01091095555AB6030F1DFE85DFDE2BC8C60261708EDB5820F18391F5AEB3ED174743245C5E902DCFE4F59A0D896D239345AF224FDF5310F00C16ACC7B71EA62CB59593431CDE56884D7A5467BD2929D67792359BE889D344DD0E211E4CB91C9C1B13F1465BCCC0E2F533C28CCE8B151A1A5195AFDD4141EFE77D4A46CB3901D0EABDCA9FA96030346DEA012982FF639A1AAB7F77B642164B8D6EF15EFC690B05EB850889DE296631DD6AF51CC3F1BE51D242663EA029D3478B2C659724C76D5DF57A3C0A8BFE3158CE4A0CF80585C3BFD13DC14D9A1CDA6290E02A866A6F508ADCE2B20CC1DFC0C816C2E4BB676B3F8B7863AF1FAB9BC9382F0D2F5ED4B10D8D9B12887A2510EBE4984775A966A8B1BCAF611F33BAD2B37B69E1C15C8FFC4847D3607DBA19B6275CC69354F16B4FC1A068D0F31758E0630ACEA7418F86CECFB5E36F0BF265BC244FF912C128B1F65BA1609C81E8FD39D1AAA137C5977C29A99C992EAB88B87F82A70AFA78AC37F842B4F72C2028C97E8E5343BCC4B472975535AFACE02CFD1A8DEF7F17B8D182F8FEB70B46656B4E562541191736DD93AF5FA1283573FD54D20BBBA9FCEF15E0F86175B79A18B436135DDC3AB09B111962319903D61492FCF65F8BA2D56E696931136148F0048C996A400");
+}
+
 TEST_CASE("comparison") {
 	// Test small values
 	for (BigInt::sword_t i = -1000; i < 1000; i++) {

@@ -30,6 +30,7 @@ class BigInt {
 		BigInt &operator>>=(size_t);
 		BigInt &operator+=(const BigInt &);
 		BigInt &operator-=(const BigInt &);
+		BigInt &operator*=(const BigInt &);
 
 		BigInt operator~() const;
 		BigInt operator-() const;
@@ -40,6 +41,8 @@ class BigInt {
 		BigInt operator>>(size_t) const;
 		BigInt operator+(const BigInt &) const;
 		BigInt operator-(const BigInt &) const;
+		BigInt operator*(const BigInt &) const;
+		BigInt pow(size_t) const;
 
 		int8_t cmp(const BigInt &) const;
 		bool operator<(const BigInt &) const;
