@@ -40,10 +40,8 @@ constexpr uint8_t log2Const(unsigned x) {
 }
 const uint8_t LOG_WORD_BITS = log2Const(WORD_BITS);
 
-template <typename I>
-typename std::enable_if<std::is_unsigned<I>::value, I>::type
-inline log2Floor(const I x) {
-	I bits;
+inline uint8_t log2Floor(const size_t x) {
+	size_t bits;
 	asm(
 		"lzcnt %1, %0\n"
 		"neg %0\n"
@@ -52,12 +50,10 @@ inline log2Floor(const I x) {
 		: "g"(x), "i"(WORD_BITS - 1)
 		: "cc"
 	);
-	return bits;
+	return static_cast<uint8_t>(bits);
 }
 
-template <typename I>
-typename std::enable_if<std::is_unsigned<I>::value, I>::type
-inline log2Ceil(const I x) {
+inline uint8_t log2Ceil(const size_t x) {
 	return log2Floor(x) + !!(x & (x - 1));
 }
 
@@ -268,18 +264,18 @@ BigInt &BigInt::operator^=(const BigInt &other) {
 	return *this;
 }
 BigInt &BigInt::operator<<=(const size_t bits) {
-	if (!bits) return *this;
+	if (!(bits && *this)) return *this; // number is unchanged
 
 	const size_t wordShift = bits >> LOG_WORD_BITS;
 	const uint8_t bitShift = bits & (WORD_BITS - 1);
 	uint8_t inverseBitShift;
-	uword_t signWord, newHighWord;
-	bool extraWord;
 	size_t wordCount = words.size();
 	size_t newWordCount = wordCount + wordShift;
+	uword_t newHighWord;
+	bool extraWord;
 	if (bitShift) {
 		inverseBitShift = WORD_BITS - bitShift;
-		signWord = getSignWord();
+		const uword_t signWord = getSignWord();
 		newHighWord = signWord << bitShift;
 		if (wordCount) newHighWord |= words.back() >> inverseBitShift;
 		extraWord = newHighWord != signWord;
@@ -288,29 +284,56 @@ BigInt &BigInt::operator<<=(const size_t bits) {
 	words.resize(newWordCount); // TODO: can this initialization be avoided?
 	uword_t * const data = words.data();
 	if (bitShift) {
-		size_t targetIndex = newWordCount - 1;
-		if (extraWord) {
-			data[targetIndex] = newHighWord;
-			if (targetIndex) targetIndex--;
-		}
+		if (extraWord) data[--newWordCount] = newHighWord;
 		if (wordCount) {
 			wordCount--;
 			while (wordCount) {
-				uword_t highBits = data[wordCount--] << bitShift;
-				data[targetIndex--] = highBits | data[wordCount] >> inverseBitShift;
+				const uword_t highBits = data[wordCount--] << bitShift;
+				data[--newWordCount] = highBits | data[wordCount] >> inverseBitShift;
 			}
-			data[targetIndex] = data[0] << bitShift;
+			data[--newWordCount] = data[0] << bitShift;
 		}
-		while (targetIndex) data[--targetIndex] = 0;
 	}
 	else {
 		while (wordCount) data[--newWordCount] = data[--wordCount];
-		while (newWordCount) data[--newWordCount] = 0;
 	}
+	while (newWordCount) data[--newWordCount] = 0;
 	return *this;
 }
 BigInt &BigInt::operator>>=(const size_t bits) {
-	throw "Unimplemented";
+	if (!bits) return *this;
+	size_t wordCount = words.size();
+	const size_t wordShift = bits >> LOG_WORD_BITS;
+	if (wordShift >= wordCount) {
+		// Handles cases when highest word moves right of the decimal point
+		// or wordCount is 0
+		words.clear();
+		return *this;
+	}
+
+	uword_t * const data = words.data();
+	const uint8_t bitShift = bits & (WORD_BITS - 1);
+	if (bitShift) {
+		const uint8_t inverseBitShift = WORD_BITS - bitShift;
+		const uword_t signWord = getSignWord();
+		const uword_t newHighWord =
+			signWord << inverseBitShift | data[--wordCount] >> bitShift;
+		size_t sourceIndex = wordShift, targetIndex = 0;
+		while (sourceIndex < wordCount) {
+			const uword_t lowBits = data[sourceIndex] >> bitShift;
+			data[targetIndex++] = lowBits | data[++sourceIndex] << inverseBitShift;
+		}
+		if (newHighWord != signWord) {
+			data[targetIndex] = newHighWord;
+			wordCount++;
+		}
+	}
+	else {
+		for (size_t sourceIndex = wordShift; sourceIndex < wordCount; sourceIndex++) {
+			data[sourceIndex - wordShift] = data[sourceIndex];
+		}
+	}
+	words.resize(wordCount - wordShift);
 	return *this;
 }
 BigInt &BigInt::operator+=(const BigInt &other) {
@@ -490,17 +513,16 @@ bool BigInt::operator>=(const BigInt &other) const {
 std::string BigInt::toString(const uword_t radix) const {
 	checkRadix(radix);
 
-	const size_t wordsCount = words.size();
-	if (!wordsCount) return sign ? "-1" : "0";
+	if (words.empty()) return sign ? "-1" : "0";
 
 	BigInt copy(*this);
 	if (sign) copy.negate();
 	uword_t * const data = copy.words.data();
-	size_t highestNonzeroWord = wordsCount;
+	size_t wordCount = copy.words.size();
 	std::string result;
-	result.reserve(sign + ceilDiv(wordsCount << LOG_WORD_BITS, log2Floor(radix)));
+	result.reserve(sign + ceilDiv(wordCount << LOG_WORD_BITS, log2Floor(radix)));
 	for (;;) {
-		size_t wordIndex = highestNonzeroWord, newHighestNonzeroWord = 0;
+		size_t wordIndex = wordCount, newHighestNonzeroWord = 0;
 		uword_t remainder = 0;
 		uword_t *word = data + wordIndex;
 		do {
@@ -516,7 +538,7 @@ std::string BigInt::toString(const uword_t radix) const {
 		result += lookup.getDigit(remainder);
 		if (!newHighestNonzeroWord) break;
 
-		highestNonzeroWord = newHighestNonzeroWord;
+		wordCount = newHighestNonzeroWord;
 	}
 	if (sign) result += '-';
 	std::reverse(result.begin(), result.end());

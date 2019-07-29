@@ -217,6 +217,74 @@ TEST_CASE("bitwise xor") {
 	CHECK(result.toString() == "123456789012345678901234567890123456789000572700434384061599768995416271796418575381561344");
 }
 
+TEST_CASE("left-shift") {
+	// Test 0-word numbers
+	BigInt zero;
+	BigInt minusOne = ~zero;
+	for (int i = 0; i < 1000; i++) {
+		BigInt value = zero << i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString() == "0");
+		value = minusOne << i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString(2) == "-1" + std::string(i, '0'));
+	}
+
+	// Test partial-word numbers
+	BigInt positive((BigInt::sword_t) 1023);
+	BigInt negative = -positive;
+	for (int i = 0; i < 1000; i++) {
+		BigInt value = positive << i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString(2) == "1111111111" + std::string(i, '0'));
+		value = negative << i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString(2) == "-1111111111" + std::string(i, '0'));
+	}
+
+	// Test numbers with 1 or more words
+	positive = BigInt();
+	for (int words = 1; words < 10; words++) {
+		positive <<= sizeof(BigInt::uword_t) * 8;
+		positive |= BigInt((BigInt::uword_t) -1);
+		negative = -positive;
+		for (int i = 0; i < 1000; i++) {
+			BigInt value = positive << i;
+			std::string expectedString =
+				std::string(sizeof(BigInt::uword_t) * 8 * words, '1') + std::string(i, '0');
+			CHECK(value.isTrimmed());
+			CHECK(value.toString(2) == expectedString);
+			value = negative << i;
+			CHECK(value.isTrimmed());
+			CHECK(value.toString(2) == '-' + expectedString);
+		}
+	}
+}
+
+TEST_CASE("right-shift") {
+	BigInt positive("123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
+	std::string positiveString = positive.toString(2);
+	size_t stringLength = positiveString.size();
+	// Ensure negative number is a power of 2 to avoid flooring issues
+	BigInt negative = -BigInt((BigInt::uword_t) 1) << (stringLength - 1);
+	for (unsigned i = 0; i < stringLength; i++) {
+		BigInt value = positive >> i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString(2) == positiveString.substr(0, stringLength - i));
+		value = negative >> i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString(2) == "-1" + std::string(stringLength - i - 1, '0'));
+	}
+	for (int i = stringLength; i < 1000; i++) {
+		BigInt value = positive >> i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString() == "0");
+		value = negative >> i;
+		CHECK(value.isTrimmed());
+		CHECK(value.toString() == "-1");
+	}
+}
+
 TEST_CASE("addition") {
 	for (BigInt::sword_t i = -1000; i < 1000; i++) {
 		BigInt bigI(i);
@@ -336,7 +404,7 @@ TEST_CASE("exponentiation") {
 	}
 
 	// Test powers of 2
-	for (uint8_t i = 0; i < (sizeof(BigInt::uword_t) << 3) - 1; i++) {
+	for (uint8_t i = 0; i < sizeof(BigInt::uword_t) * 8 - 1; i++) {
 		BigInt power = BigInt((BigInt::uword_t) 2).pow(i);
 		CHECK(power.isTrimmed());
 		CHECK(power.toString() == builtinToString((BigInt::uword_t) 1 << i));
