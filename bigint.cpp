@@ -35,7 +35,7 @@ class DigitLookup {
 const DigitLookup lookup;
 
 const uint8_t WORD_BITS = sizeof(BigInt::uword_t) << 3;
-constexpr uint8_t log2Const(unsigned x) {
+constexpr uint8_t log2Const(uint8_t x) {
 	return x == 1 ? 0 : log2Const(x >> 1) + 1;
 }
 const uint8_t LOG_WORD_BITS = log2Const(WORD_BITS);
@@ -266,11 +266,11 @@ BigInt &BigInt::operator^=(const BigInt &other) {
 BigInt &BigInt::operator<<=(const size_t bits) {
 	if (!(bits && *this)) return *this; // number is unchanged
 
-	const size_t wordShift = bits >> LOG_WORD_BITS;
+	size_t wordShift = bits >> LOG_WORD_BITS;
 	const uint8_t bitShift = bits & (WORD_BITS - 1);
 	uint8_t inverseBitShift;
 	size_t wordCount = words.size();
-	size_t newWordCount = wordCount + wordShift;
+	const size_t newWordCount = wordCount + wordShift;
 	uword_t newHighWord;
 	bool extraWord;
 	if (bitShift) {
@@ -279,30 +279,36 @@ BigInt &BigInt::operator<<=(const size_t bits) {
 		newHighWord = signWord << bitShift;
 		if (wordCount) newHighWord |= words.back() >> inverseBitShift;
 		extraWord = newHighWord != signWord;
-		newWordCount += extraWord;
 	}
-	words.resize(newWordCount); // TODO: can this initialization be avoided?
+	else extraWord = false;
+	words.resize(newWordCount + extraWord); // TODO: can this initialization be avoided?
 	uword_t * const data = words.data();
+	uword_t * const targetData = data + wordShift;
 	if (bitShift) {
-		if (extraWord) data[--newWordCount] = newHighWord;
+		if (extraWord) targetData[wordCount] = newHighWord;
 		if (wordCount) {
-			wordCount--;
+			uword_t previousWord = data[--wordCount];
 			while (wordCount) {
-				const uword_t highBits = data[wordCount--] << bitShift;
-				data[--newWordCount] = highBits | data[wordCount] >> inverseBitShift;
+				const uword_t highBits = previousWord << bitShift;
+				previousWord = data[--wordCount];
+				targetData[wordCount + 1] = highBits | previousWord >> inverseBitShift;
 			}
-			data[--newWordCount] = data[0] << bitShift;
+			targetData[0] = previousWord << bitShift;
 		}
 	}
 	else {
-		while (wordCount) data[--newWordCount] = data[--wordCount];
+		while (wordCount) {
+			--wordCount;
+			targetData[wordCount] = data[wordCount];
+		}
 	}
-	while (newWordCount) data[--newWordCount] = 0;
+	while (wordShift) data[--wordShift] = 0;
 	return *this;
 }
 BigInt &BigInt::operator>>=(const size_t bits) {
 	if (!bits) return *this;
-	size_t wordCount = words.size();
+
+	const size_t wordCount = words.size();
 	const size_t wordShift = bits >> LOG_WORD_BITS;
 	if (wordShift >= wordCount) {
 		// Handles cases when highest word moves right of the decimal point
@@ -315,25 +321,27 @@ BigInt &BigInt::operator>>=(const size_t bits) {
 	const uint8_t bitShift = bits & (WORD_BITS - 1);
 	if (bitShift) {
 		const uint8_t inverseBitShift = WORD_BITS - bitShift;
+		size_t sourceIndex = wordShift, targetIndex = 0;
+		uword_t previousWord = data[sourceIndex++];
+		while (sourceIndex < wordCount) {
+			const uword_t lowBits = previousWord >> bitShift;
+			previousWord = data[sourceIndex++];
+			data[targetIndex++] = previousWord << inverseBitShift | lowBits;
+		}
 		const uword_t signWord = getSignWord();
 		const uword_t newHighWord =
-			signWord << inverseBitShift | data[--wordCount] >> bitShift;
-		size_t sourceIndex = wordShift, targetIndex = 0;
-		while (sourceIndex < wordCount) {
-			const uword_t lowBits = data[sourceIndex] >> bitShift;
-			data[targetIndex++] = lowBits | data[++sourceIndex] << inverseBitShift;
-		}
-		if (newHighWord != signWord) {
-			data[targetIndex] = newHighWord;
-			wordCount++;
-		}
+			signWord << inverseBitShift | previousWord >> bitShift;
+		if (newHighWord != signWord) data[targetIndex++] = newHighWord;
+		words.resize(targetIndex);
 	}
 	else {
-		for (size_t sourceIndex = wordShift; sourceIndex < wordCount; sourceIndex++) {
-			data[sourceIndex - wordShift] = data[sourceIndex];
+		uword_t * const sourceData = data + wordShift;
+		const size_t newWordCount = wordCount - wordShift;
+		for (size_t targetIndex = 0; targetIndex < newWordCount; targetIndex++) {
+			data[targetIndex] = sourceData[targetIndex];
 		}
+		words.resize(newWordCount);
 	}
-	words.resize(wordCount - wordShift);
 	return *this;
 }
 BigInt &BigInt::operator+=(const BigInt &other) {
