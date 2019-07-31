@@ -31,6 +31,8 @@ class BigInt {
 		BigInt &operator+=(const BigInt &);
 		BigInt &operator-=(const BigInt &);
 		BigInt &operator*=(const BigInt &);
+		BigInt &operator/=(const BigInt &);
+		BigInt &operator%=(const BigInt &);
 
 		BigInt operator~() const;
 		BigInt operator-() const;
@@ -42,6 +44,8 @@ class BigInt {
 		BigInt operator+(const BigInt &) const;
 		BigInt operator-(const BigInt &) const;
 		BigInt operator*(const BigInt &) const;
+		BigInt operator/(const BigInt &) const;
+		BigInt operator%(const BigInt &) const;
 		BigInt pow(size_t) const;
 
 		int8_t cmp(const BigInt &) const;
@@ -64,6 +68,8 @@ class BigInt {
 
 		uword_t getSignWord() const;
 		void trim() const;
+
+		void divMod(const BigInt &other, BigInt *quotient);
 
 		static void checkRadix(uword_t);
 };

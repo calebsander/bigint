@@ -348,38 +348,34 @@ BigInt &BigInt::operator+=(const BigInt &other) {
 	size_t wordCount = words.size(), otherWordCount = other.words.size();
 	const size_t maxCount =
 		(wordCount > otherWordCount ? wordCount : otherWordCount) + 1;
-	words.reserve(maxCount);
-	uword_t signWord = getSignWord();
-	while (wordCount < maxCount) {
-		words.push_back(signWord);
-		wordCount++;
-	}
+	words.resize(maxCount, getSignWord());
 	wordCount = maxCount - otherWordCount;
-	signWord = other.getSignWord();
+	const uword_t signWord = other.getSignWord();
 	uword_t * const word = words.data();
 	const uword_t * const otherWord = other.words.data();
 	size_t index = 0;
+	uword_t sum;
 	bool carry;
 	asm(
 		"test %2, %2\n"
 		"jz 2f\n"
 		"1:"
-		"mov (%4, %0, 8), %%rax\n"
-		"adc (%5, %0, 8), %%rax\n"
-		"mov %%rax, (%4, %0, 8)\n"
+		"mov (%5, %0, 8), %3\n"
+		"adc (%6, %0, 8), %3\n"
+		"mov %3, (%5, %0, 8)\n"
 		"inc %0\n"
 		"dec %2\n"
 		"jnz 1b\n"
 
 		"2:"
-		"adc %6, (%4, %0, 8)\n"
+		"adc %7, (%5, %0, 8)\n"
 		"inc %0\n"
 		"dec %1\n"
 		"jnz 2b\n"
-		"setc %3\n"
-		: "+r"(index), "+r"(wordCount), "+r"(otherWordCount), "=g"(carry)
+		"setc %4\n"
+		: "+r"(index), "+r"(wordCount), "+r"(otherWordCount), "=&r"(sum), "=g"(carry)
 		: "r"(word), "r"(otherWord), "r"(signWord)
-		: "rax", "cc"
+		: "cc"
 	);
 	sign ^= other.sign ^ carry;
 	trim();
@@ -391,6 +387,15 @@ BigInt &BigInt::operator-=(const BigInt &other) {
 }
 BigInt &BigInt::operator*=(const BigInt &other) {
 	return *this = *this * other;
+}
+BigInt &BigInt::operator/=(const BigInt &other) {
+	BigInt quotient;
+	divMod(other, &quotient);
+	return *this = quotient;
+}
+BigInt &BigInt::operator%=(const BigInt &other) {
+	divMod(other, nullptr);
+	return *this;
 }
 
 BigInt BigInt::operator~() const {
@@ -464,6 +469,12 @@ BigInt BigInt::operator*(const BigInt &other) const {
 	result.trim();
 	if (sign ^ other.sign) result.negate();
 	return result;
+}
+BigInt BigInt::operator/(const BigInt &other) const {
+	return BigInt(*this) /= other;
+}
+BigInt BigInt::operator%(const BigInt &other) const {
+	return BigInt(*this) %= other;
 }
 BigInt BigInt::pow(size_t power) const {
 	BigInt result(static_cast<uword_t>(1));
@@ -570,6 +581,37 @@ inline void BigInt::trim() const {
 	const uword_t *word = &words.back();
 	while (wordCount && *(word--) == signWord) wordCount--;
 	const_cast<std::vector<uword_t> &>(words).resize(wordCount);
+}
+
+void BigInt::divMod(const BigInt &other, BigInt *quotient) {
+	// TODO: handle signedness
+	if (quotient) *quotient = BigInt();
+	if (other > *this) return;
+
+	// TODO: operate on words instead of bits
+	const size_t wordCount = words.size(), otherWordCount = other.words.size();
+	const size_t shiftWords = wordCount + 1 - otherWordCount;
+	size_t shiftBits = (shiftWords << LOG_WORD_BITS) - 1;
+	BigInt otherCopy = other << shiftBits;
+	uword_t * quotientData;
+	if (quotient) {
+		quotient->words.resize(shiftWords);
+		quotientData = quotient->words.data();
+	}
+	for (;;) {
+		if (*this >= otherCopy) {
+			*this -= otherCopy;
+			if (quotient) {
+				quotientData[shiftBits >> LOG_WORD_BITS] |=
+					(uword_t) 1 << (shiftBits & (WORD_BITS - 1));
+			}
+		}
+		if (!shiftBits) break;
+
+		shiftBits--;
+		otherCopy >>= 1;
+	}
+	if (quotient) quotient->trim();
 }
 
 inline void BigInt::checkRadix(uword_t radix) {
