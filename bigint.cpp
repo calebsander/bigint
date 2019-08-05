@@ -40,6 +40,10 @@ constexpr uint8_t log2Const(uint8_t x) {
 }
 const uint8_t LOG_WORD_BITS = log2Const(WORD_BITS);
 
+inline size_t bitsToWords(size_t bits) {
+	return (WORD_BITS - 1 + bits) >> LOG_WORD_BITS;
+}
+
 inline uint8_t log2Floor(const size_t x) {
 	size_t bits;
 	asm(
@@ -52,7 +56,6 @@ inline uint8_t log2Floor(const size_t x) {
 	);
 	return static_cast<uint8_t>(bits);
 }
-
 inline uint8_t log2Ceil(const size_t x) {
 	return log2Floor(x) + !!(x & (x - 1));
 }
@@ -94,25 +97,25 @@ BigInt::BigInt(const std::string &digits, const uword_t radix) : sign(false) {
 	checkRadix(radix);
 
 	auto it = digits.begin(), end = digits.end();
-	const bool negative = digits.size() && *it == '-';
+	const bool negative = it != end && *it == '-';
 	if (negative) ++it;
 
-	const size_t wordCount =
-		(WORD_BITS - 1 + log2Ceil(radix) * digits.size()) >> LOG_WORD_BITS;
-	words.resize(wordCount);
+	const uint8_t digitBits = log2Ceil(radix);
+	words.resize(bitsToWords(digitBits * digits.size()));
 	uword_t * const data = words.data();
+	size_t setBits = 0;
 	while (it != end) {
 		uword_t carry = lookup.getValue(*it);
+		setBits += digitBits;
 		uword_t *word = data;
-		for (size_t index = wordCount; index; index--) {
+		for (size_t index = bitsToWords(setBits); index; index--) {
 			asm(
 				"mul %2\n"
-				"add %1, %0\n"
-				"mov %%rdx, %1\n"
+				"add %3, %0\n"
 				"adc $0, %1\n"
-				: "+a"(*word), "+r"(carry)
-				: "r"(radix)
-				: "rdx", "cc"
+				: "+a"(*word), "=&d"(carry)
+				: "r"(radix), "r"(carry)
+				: "cc"
 			);
 			word++;
 		}
@@ -457,7 +460,7 @@ BigInt BigInt::operator*(const BigInt &other) const {
 				"add %4, %0\n"
 				"adc $0, %1\n"
 				: "=a"(productWordStart[thisIndex]), "=&d"(carry)
-				: "a"(thisWords[thisIndex]), "g"(*otherWord), "g"(carry)
+				: "a"(thisWords[thisIndex]), "g"(*otherWord), "r"(carry)
 				: "cc"
 			);
 		}
