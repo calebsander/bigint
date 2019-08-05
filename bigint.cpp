@@ -440,34 +440,34 @@ BigInt BigInt::operator-(const BigInt &other) const {
 BigInt BigInt::operator*(const BigInt &other) const {
 	const BigInt &positiveThis = sign ? -*this : *this;
 	const BigInt &positiveOther = other.sign ? -other : other;
-	const size_t wordCount = positiveThis.words.size();
 	size_t otherWordCount = positiveOther.words.size();
-	BigInt result, wordProduct;
-	{
-		const size_t resultWordCount = wordCount + otherWordCount;
-		result.words.reserve(resultWordCount);
-		wordProduct.words.reserve(resultWordCount);
-	}
-	wordProduct.words.resize(wordCount); // TODO: skip this initialization
+	const size_t wordCount = positiveThis.words.size();
+	BigInt result;
+	result.words.reserve(wordCount + otherWordCount);
+	result.words.resize(wordCount);
 	const uword_t * const thisWords = positiveThis.words.data();
 	const uword_t *otherWord = positiveOther.words.data();
-	uword_t *productWordStart = wordProduct.words.data();
-	for (; otherWordCount; otherWordCount--, otherWord++) {
-		uword_t carry = 0;
+	uword_t *resultWordStart = result.words.data();
+	for (; otherWordCount; otherWordCount--) {
+		const uword_t multiplier = *(otherWord++);
+		uword_t carry = 0, highCarry = 0;
 		for (size_t thisIndex = 0; thisIndex < wordCount; thisIndex++) {
+			uword_t addWord;
 			asm(
-				"mulq %3\n"
-				"add %4, %0\n"
-				"adc $0, %1\n"
-				: "=a"(productWordStart[thisIndex]), "=&d"(carry)
-				: "a"(thisWords[thisIndex]), "g"(*otherWord), "r"(carry)
+				"mul %5\n"
+				"add %6, %0\n"
+				"adc $0, %b3\n"
+				"add %0, %1\n"
+				"adc $0, %b3\n"
+				"add %3, %2\n"
+				"setc %b3\n"
+				: "=a"(addWord), "+m"(resultWordStart[thisIndex]), "=&d"(carry), "+r"(highCarry)
+				: "a"(thisWords[thisIndex]), "r"(multiplier), "r"(carry)
 				: "cc"
 			);
 		}
-		wordProduct.words.push_back(carry);
-		// TODO: can the addition be performed while multiplying to avoid traversing words twice?
-		result += wordProduct;
-		*(productWordStart++) = 0;
+		result.words.push_back(carry);
+		resultWordStart++;
 	}
 	result.trim();
 	if (sign ^ other.sign) result.negate();
@@ -606,7 +606,7 @@ void BigInt::divMod(const BigInt &other, BigInt *quotient) {
 			*this -= otherCopy;
 			if (quotient) {
 				quotientData[shiftBits >> LOG_WORD_BITS] |=
-					(uword_t) 1 << (shiftBits & (WORD_BITS - 1));
+					static_cast<uword_t>(1) << (shiftBits & (WORD_BITS - 1));
 			}
 		}
 		if (!shiftBits) break;
