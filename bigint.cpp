@@ -133,9 +133,7 @@ BigInt &BigInt::operator=(BigInt other) {
 }
 
 BigInt &BigInt::invert() {
-	uword_t * const data = words.data();
-	const size_t wordCount = words.size();
-	for (size_t index = 0; index < wordCount; index++) invertWord(data[index]);
+	for (uword_t &word : words) invertWord(word);
 	sign = !sign;
 	return *this;
 }
@@ -148,33 +146,31 @@ BigInt &BigInt::negate() {
 	}
 
 	sign = !sign;
-	size_t wordCount = words.size();
+	size_t wordsNegated = 0;
 	uword_t *word = words.data();
 	asm(
 		"jmp 2f\n"
 		"1:"
-		"add %2, %0\n"
+		"inc %0\n"
 		"2:"
-		"dec %1\n"
-		"negq (%0)\n"
+		"negq (%1, %0, 8)\n"
 		"jz 1b\n"
-		: "+r"(word), "+r"(wordCount)
-		: "i"(sizeof(*word))
+		: "+r"(wordsNegated)
+		: "r"(word)
 		: "cc"
 	);
-	if (wordCount) {
+	word += wordsNegated + 1;
+	const uword_t *endWord = &*words.end();
+	if (word < endWord) {
 		if (!sign) { // not all words were negated, so added word is unneeded
 			words.pop_back();
-			wordCount--;
+			endWord--;
 		}
-		while (wordCount) {
-			invertWord(*++word);
-			wordCount--;
-		}
+		while (word < endWord) invertWord(*(word++));
 	}
 	else {
 		// If positive, may become one word shorter
-		if (sign && *word == static_cast<uword_t>(-1)) words.pop_back();
+		if (sign && word[-1] == static_cast<uword_t>(-1)) words.pop_back();
 	}
 	return *this;
 }
@@ -360,7 +356,7 @@ BigInt &BigInt::operator+=(const BigInt &other) {
 	uword_t sum;
 	bool carry;
 	asm(
-		"test %2, %2\n"
+		"test %2, %2\n" // also clears carry flag
 		"jz 2f\n"
 		"1:"
 		"mov (%5, %0, 8), %3\n"
