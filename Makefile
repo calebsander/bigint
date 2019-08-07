@@ -1,5 +1,5 @@
-CXX = clang++
-CPPFLAGS = -std=c++11 -Wall -g -O3 -fsanitize=address
+CXX = g++
+CPPFLAGS = -std=c++11 -Wall -g -O3 -I./
 
 test: test-main
 	./test-main

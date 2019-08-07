@@ -30,11 +30,15 @@ class DigitLookup {
 
 	private:
 		char valueDigits[MAX_RADIX];
-		uint8_t digitValues[1 << (sizeof(char) << 3)];
+		uint8_t digitValues[1 << (sizeof(char) * 8)];
 };
 const DigitLookup lookup;
 
-const uint8_t WORD_BITS = sizeof(BigInt::uword_t) << 3;
+inline void checkRadix(BigInt::uword_t radix) {
+	if (radix < 2 || radix > MAX_RADIX) throw std::out_of_range("Invalid radix");
+}
+
+const uint8_t WORD_BITS = sizeof(BigInt::uword_t) * 8;
 constexpr uint8_t log2Const(uint8_t x) {
 	return x == 1 ? 0 : log2Const(x >> 1) + 1;
 }
@@ -178,7 +182,7 @@ BigInt &BigInt::operator&=(const BigInt &other) {
 	size_t wordCount = words.size(), otherWordCount = other.words.size();
 	size_t andWordCount;
 	if (wordCount < otherWordCount) {
-		if (sign) words.resize(otherWordCount); // TODO: can this initialization be avoided?
+		if (sign) words.reserve(otherWordCount);
 		else otherWordCount = wordCount;
 		andWordCount = wordCount;
 	}
@@ -193,8 +197,7 @@ BigInt &BigInt::operator&=(const BigInt &other) {
 		data[index] &= otherData[index];
 	}
 	while (index < otherWordCount) {
-		data[index] = otherData[index];
-		index++;
+		words.push_back(otherData[index++]);
 	}
 	sign &= other.sign;
 	trim();
@@ -205,7 +208,7 @@ BigInt &BigInt::operator|=(const BigInt &other) {
 	size_t orWordCount;
 	if (wordCount < otherWordCount) {
 		if (sign) otherWordCount = wordCount;
-		else words.resize(otherWordCount); // TODO: can this initialization be avoided?
+		else words.reserve(otherWordCount);
 		orWordCount = wordCount;
 	}
 	else {
@@ -219,8 +222,7 @@ BigInt &BigInt::operator|=(const BigInt &other) {
 		data[index] |= otherData[index];
 	}
 	while (index < otherWordCount) {
-		data[index] = otherData[index];
-		index++;
+		words.push_back(otherData[index++]);
 	}
 	sign |= other.sign;
 	trim();
@@ -231,7 +233,7 @@ BigInt &BigInt::operator^=(const BigInt &other) {
 	size_t xorWordCount;
 	if (wordCount < otherWordCount) {
 		xorWordCount = wordCount;
-		words.resize(otherWordCount); // TODO: can this initialization be avoided?
+		words.reserve(otherWordCount);
 	}
 	else xorWordCount = otherWordCount;
 	uword_t * const data = words.data();
@@ -243,20 +245,17 @@ BigInt &BigInt::operator^=(const BigInt &other) {
 	if (index < otherWordCount) {
 		if (sign) {
 			do {
-				data[index] = ~otherData[index];
-			} while (++index < otherWordCount);
+				words.push_back(~otherData[index++]);
+			} while (index < otherWordCount);
 		}
 		else {
 			do {
-				data[index] = otherData[index];
-			} while (++index < otherWordCount);
+				words.push_back(otherData[index++]);
+			} while (index < otherWordCount);
 		}
 	}
 	else if (other.sign) {
-		while (index < wordCount) {
-			invertWord(data[index]);
-			index++;
-		}
+		while (index < wordCount) invertWord(data[index++]);
 	}
 	sign ^= other.sign;
 	trim();
@@ -366,6 +365,7 @@ BigInt &BigInt::operator+=(const BigInt &other) {
 		"dec %2\n"
 		"jnz 1b\n"
 
+		// TODO: skip the remaining words if other is unsigned and there is no carry
 		"2:"
 		"adc %7, (%5, %0, 8)\n"
 		"inc %0\n"
@@ -531,7 +531,7 @@ bool BigInt::operator>=(const BigInt &other) const {
 std::string BigInt::toString(const uword_t radix) const {
 	checkRadix(radix);
 
-	if (words.empty()) return sign ? "-1" : "0";
+	if (!*this) return "0"; // ensure at least one digit is returned
 
 	BigInt copy(*this);
 	if (sign) copy.negate();
@@ -539,8 +539,9 @@ std::string BigInt::toString(const uword_t radix) const {
 	size_t wordCount = copy.words.size();
 	std::string result;
 	result.reserve(sign + ceilDiv(wordCount << LOG_WORD_BITS, log2Floor(radix)));
-	for (;;) {
-		size_t wordIndex = wordCount, newHighestNonzeroWord = 0;
+	do {
+		size_t wordIndex = wordCount;
+		wordCount = 0;
 		uword_t remainder = 0;
 		uword_t *word = data + wordIndex;
 		do {
@@ -548,16 +549,13 @@ std::string BigInt::toString(const uword_t radix) const {
 			asm(
 				"divq %2\n"
 				: "+a"(*word), "+d"(remainder)
-				: "g"(radix)
+				: "r"(radix)
 				: "cc"
 			);
-			if (!newHighestNonzeroWord && *word) newHighestNonzeroWord = wordIndex;
+			if (!wordCount && *word) wordCount = wordIndex;
 		} while (--wordIndex);
 		result += lookup.getDigit(remainder);
-		if (!newHighestNonzeroWord) break;
-
-		wordCount = newHighestNonzeroWord;
-	}
+	} while (wordCount);
 	if (sign) result += '-';
 	std::reverse(result.begin(), result.end());
 	return result;
@@ -574,12 +572,12 @@ bool BigInt::isTrimmed() const {
 inline BigInt::uword_t BigInt::getSignWord() const {
 	return -static_cast<uword_t>(sign);
 }
-inline void BigInt::trim() const {
+inline void BigInt::trim() {
 	size_t wordCount = words.size();
 	const uword_t signWord = getSignWord();
 	const uword_t *word = &words.back();
 	while (wordCount && *(word--) == signWord) wordCount--;
-	const_cast<std::vector<uword_t> &>(words).resize(wordCount);
+	words.resize(wordCount);
 }
 
 void BigInt::divMod(const BigInt &other, BigInt *quotient) {
@@ -611,8 +609,4 @@ void BigInt::divMod(const BigInt &other, BigInt *quotient) {
 		otherCopy >>= 1;
 	}
 	if (quotient) quotient->trim();
-}
-
-inline void BigInt::checkRadix(uword_t radix) {
-	if (radix < 2 || radix > MAX_RADIX) throw std::out_of_range("Invalid radix");
 }

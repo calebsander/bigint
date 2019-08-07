@@ -67,11 +67,9 @@ class BigInt {
 		std::vector<uword_t> words; // LE
 
 		uword_t getSignWord() const;
-		void trim() const;
+		void trim();
 
 		void divMod(const BigInt &other, BigInt *quotient);
-
-		static void checkRadix(uword_t);
 };
 
 #endif // #ifndef __BIGINT_H__
