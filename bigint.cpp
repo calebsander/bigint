@@ -101,8 +101,12 @@ BigInt::BigInt(const std::string &digits, const uword_t radix) : sign(false) {
 	checkRadix(radix);
 
 	auto it = digits.begin(), end = digits.end();
-	const bool negative = it != end && *it == '-';
-	if (negative) ++it;
+	bool negative = false;
+	if (it < end) {
+		const char firstChar = *it;
+		if (firstChar == '-') negative = true;
+		if (negative || firstChar == '+') ++it;
+	}
 
 	const uint8_t digitBits = log2Ceil(radix);
 	words.resize(bitsToWords(digitBits * digits.size()));
@@ -143,9 +147,9 @@ BigInt &BigInt::invert() {
 }
 BigInt &BigInt::negate() {
 	// If negative, may become one word longer
-	if (sign) words.push_back(getSignWord());
+	if (sign) words.push_back(static_cast<BigInt::uword_t>(-1));
 	else {
-		// If zero, value is unchanged
+		// Special case for 0 -- sign does not change
 		if (words.empty()) return *this;
 	}
 
@@ -163,19 +167,9 @@ BigInt &BigInt::negate() {
 		: "r"(word)
 		: "cc"
 	);
-	word += wordsNegated + 1;
-	const uword_t *endWord = &*words.end();
-	if (word < endWord) {
-		if (!sign) { // not all words were negated, so added word is unneeded
-			words.pop_back();
-			endWord--;
-		}
-		while (word < endWord) invertWord(*(word++));
-	}
-	else {
-		// If positive, may become one word shorter
-		if (sign && word[-1] == static_cast<uword_t>(-1)) words.pop_back();
-	}
+	const uword_t * const endWord = &*words.end();
+	for (word += wordsNegated + 1; word < endWord; word++) invertWord(*word);
+	trimOnce();
 	return *this;
 }
 BigInt &BigInt::operator&=(const BigInt &other) {
@@ -266,33 +260,20 @@ BigInt &BigInt::operator<<=(const size_t bits) {
 
 	size_t wordShift = bits >> LOG_WORD_BITS;
 	const uint8_t bitShift = bits & (WORD_BITS - 1);
-	uint8_t inverseBitShift;
 	size_t wordCount = words.size();
-	const size_t newWordCount = wordCount + wordShift;
-	uword_t newHighWord;
-	bool extraWord;
-	if (bitShift) {
-		inverseBitShift = WORD_BITS - bitShift;
-		const uword_t signWord = getSignWord();
-		newHighWord = signWord << bitShift;
-		if (wordCount) newHighWord |= words.back() >> inverseBitShift;
-		extraWord = newHighWord != signWord;
-	}
-	else extraWord = false;
-	words.resize(newWordCount + extraWord); // TODO: can this initialization be avoided?
+	words.resize(wordCount + wordShift + !!bitShift); // TODO: can this initialization be avoided?
 	uword_t * const data = words.data();
 	uword_t * const targetData = data + wordShift;
 	if (bitShift) {
-		if (extraWord) targetData[wordCount] = newHighWord;
-		if (wordCount) {
-			uword_t previousWord = data[--wordCount];
-			while (wordCount) {
-				const uword_t highBits = previousWord << bitShift;
-				previousWord = data[--wordCount];
-				targetData[wordCount + 1] = highBits | previousWord >> inverseBitShift;
-			}
-			targetData[0] = previousWord << bitShift;
+		uint8_t inverseBitShift = WORD_BITS - bitShift;
+		uword_t previousWord = getSignWord();
+		while (wordCount) {
+			const uword_t highBits = previousWord << bitShift;
+			previousWord = data[--wordCount];
+			targetData[wordCount + 1] = highBits | previousWord >> inverseBitShift;
 		}
+		targetData[0] = previousWord << bitShift;
+		trimOnce();
 	}
 	else {
 		while (wordCount) {
@@ -342,47 +323,48 @@ BigInt &BigInt::operator>>=(const size_t bits) {
 	}
 	return *this;
 }
+#define CARRY_OPERATION(op) { \
+	size_t wordCount = words.size(), otherWordCount = other.words.size(); \
+	const size_t maxCount = \
+		(wordCount > otherWordCount ? wordCount : otherWordCount) + 1; \
+	words.resize(maxCount, getSignWord()); \
+	wordCount = maxCount - otherWordCount; \
+	const uword_t signWord = other.getSignWord(); \
+	uword_t * const data = words.data(); \
+	const uword_t * const otherData = other.words.data(); \
+	size_t index = 0; \
+	uword_t temp; \
+	bool carry; \
+	asm( \
+		"test %2, %2\n" /* also clears carry flag */ \
+		"jz 2f\n" \
+		"1:" \
+		"mov (%5, %0, 8), %3\n" \
+		op " (%6, %0, 8), %3\n" \
+		"mov %3, (%5, %0, 8)\n" \
+		"inc %0\n" \
+		"dec %2\n" \
+		"jnz 1b\n" \
+		/* TODO: skip the remaining words if other is unsigned and there is no carry */ \
+		"2:" \
+		op " %7, (%5, %0, 8)\n" \
+		"inc %0\n" \
+		"dec %1\n" \
+		"jnz 2b\n" \
+		"setc %4\n" \
+		: "+r"(index), "+r"(wordCount), "+r"(otherWordCount), "=&r"(temp), "=g"(carry) \
+		: "r"(data), "r"(otherData), "r"(signWord) \
+		: "cc" \
+	); \
+	sign ^= other.sign ^ carry; \
+	trim(); \
+	return *this; \
+}
 BigInt &BigInt::operator+=(const BigInt &other) {
-	size_t wordCount = words.size(), otherWordCount = other.words.size();
-	const size_t maxCount =
-		(wordCount > otherWordCount ? wordCount : otherWordCount) + 1;
-	words.resize(maxCount, getSignWord());
-	wordCount = maxCount - otherWordCount;
-	const uword_t signWord = other.getSignWord();
-	uword_t * const word = words.data();
-	const uword_t * const otherWord = other.words.data();
-	size_t index = 0;
-	uword_t sum;
-	bool carry;
-	asm(
-		"test %2, %2\n" // also clears carry flag
-		"jz 2f\n"
-		"1:"
-		"mov (%5, %0, 8), %3\n"
-		"adc (%6, %0, 8), %3\n"
-		"mov %3, (%5, %0, 8)\n"
-		"inc %0\n"
-		"dec %2\n"
-		"jnz 1b\n"
-
-		// TODO: skip the remaining words if other is unsigned and there is no carry
-		"2:"
-		"adc %7, (%5, %0, 8)\n"
-		"inc %0\n"
-		"dec %1\n"
-		"jnz 2b\n"
-		"setc %4\n"
-		: "+r"(index), "+r"(wordCount), "+r"(otherWordCount), "=&r"(sum), "=g"(carry)
-		: "r"(word), "r"(otherWord), "r"(signWord)
-		: "cc"
-	);
-	sign ^= other.sign ^ carry;
-	trim();
-	return *this;
+	CARRY_OPERATION("adc");
 }
 BigInt &BigInt::operator-=(const BigInt &other) {
-	// TODO: optimize to avoid traversing words twice
-	return *this += -other;
+	CARRY_OPERATION("sbb");
 }
 BigInt &BigInt::operator*=(const BigInt &other) {
 	return *this = *this * other;
@@ -430,7 +412,7 @@ BigInt BigInt::operator+(const BigInt &other) const {
 	return BigInt(*this) += other;
 }
 BigInt BigInt::operator-(const BigInt &other) const {
-	// TODO: optimize to avoid traversing words three times
+	// TODO: optimize to avoid traversing words twice
 	return BigInt(*this) -= other;
 }
 BigInt BigInt::operator*(const BigInt &other) const {
@@ -578,6 +560,9 @@ inline void BigInt::trim() {
 	const uword_t *word = &words.back();
 	while (wordCount && *(word--) == signWord) wordCount--;
 	words.resize(wordCount);
+}
+inline void BigInt::trimOnce() {
+	if (words.back() == getSignWord()) words.pop_back();
 }
 
 void BigInt::divMod(const BigInt &other, BigInt *quotient) {

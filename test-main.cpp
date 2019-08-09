@@ -330,6 +330,62 @@ TEST_CASE("addition") {
 	CHECK(value.toString() == "9876543210987654321098765432109876543209");
 }
 
+TEST_CASE("subtraction") {
+	for (BigInt::sword_t i = -1000; i < 1000; i++) {
+		BigInt bigI(i);
+		for (BigInt::sword_t j = -100; j < 100; j++) {
+			BigInt sum = bigI - BigInt(j);
+			CHECK(sum.isTrimmed());
+			CHECK(sum.toString() == builtinToString(i - j));
+		}
+	}
+
+	// Test subtraction that overflows
+	BigInt value((BigInt::uword_t) -2);
+	value -= BigInt((BigInt::sword_t) -5);
+	CHECK(value.isTrimmed());
+	CHECK(value.toString(16) == "10000000000000003");
+
+	// Test several-word numbers
+	value =
+		BigInt("+9876543210987654321098765432109876543210") -
+		BigInt("+0123456789012345678901234567890123456789");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "9753086421975308642197530864219753086421");
+	value =
+		BigInt("+9876543210987654321098765432109876543210") -
+		BigInt("-0123456789012345678901234567890123456789");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == std::string(40, '9'));
+	value =
+		BigInt("-9876543210987654321098765432109876543210") -
+		BigInt("+0123456789012345678901234567890123456789");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == '-' + std::string(40, '9'));
+	value =
+		BigInt("-9876543210987654321098765432109876543210") -
+		BigInt("-0123456789012345678901234567890123456789");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "-9753086421975308642197530864219753086421");
+
+	// Test edge cases of subtracting 0-word numbers
+	value = BigInt("9876543210987654321098765432109876543210");
+	value -= BigInt();
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "9876543210987654321098765432109876543210");
+	value -= BigInt((BigInt::sword_t) -1);
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "9876543210987654321098765432109876543211");
+	value = BigInt();
+	value -= BigInt("9876543210987654321098765432109876543210");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "-9876543210987654321098765432109876543210");
+	value = BigInt((BigInt::sword_t) -1);
+	value -= BigInt("9876543210987654321098765432109876543210");
+	CHECK(value.isTrimmed());
+	CHECK(value.toString() == "-9876543210987654321098765432109876543211");
+}
+
 TEST_CASE("multiplication") {
 	BigInt zero;
 	BigInt oneWord((BigInt::uword_t) -1);

@@ -68,6 +68,7 @@ class BigInt {
 
 		uword_t getSignWord() const;
 		void trim();
+		void trimOnce();
 
 		void divMod(const BigInt &other, BigInt *quotient);
 };
