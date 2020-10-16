@@ -428,18 +428,16 @@ BigInt BigInt::operator*(const BigInt &other) const {
 	uword_t *resultWordStart = result.words.data();
 	for (; otherWordCount; otherWordCount--) {
 		const uword_t multiplier = *(otherWord++);
-		uword_t carry = 0, highCarry = 0;
+		uword_t carry = 0;
 		for (size_t thisIndex = 0; thisIndex < wordCount; thisIndex++) {
 			uword_t addWord;
 			asm(
-				"mul %5\n"
-				"add %6, %0\n"
-				"adc $0, %b3\n"
+				"mul %4\n"
+				"add %5, %0\n"
+				"adc $0, %2\n"
 				"add %0, %1\n"
-				"adc $0, %b3\n"
-				"add %3, %2\n"
-				"setc %b3\n"
-				: "=a"(addWord), "+m"(resultWordStart[thisIndex]), "=&d"(carry), "+r"(highCarry)
+				"adc $0, %2\n"
+				: "=a"(addWord), "+m"(resultWordStart[thisIndex]), "=&d"(carry)
 				: "a"(thisWords[thisIndex]), "r"(multiplier), "r"(carry)
 				: "cc"
 			);
